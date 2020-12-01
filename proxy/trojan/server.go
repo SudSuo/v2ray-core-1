@@ -25,7 +25,6 @@ import (
 	"v2ray.com/core/features/routing"
 	"v2ray.com/core/transport/internet"
 	"v2ray.com/core/transport/internet/udp"
-	"v2ray.com/core/transport/internet/xtls"
 )
 
 func init() {
@@ -194,34 +193,6 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn internet
 		return s.handleUDPPayload(ctx, &PacketReader{Reader: clientReader}, &PacketWriter{Writer: conn}, dispatcher)
 	}
 
-	// handle tcp request
-	account, ok := user.Account.(*MemoryAccount)
-	if !ok {
-		return newError("user account is not valid")
-	}
-
-	switch clientReader.Flow {
-	case XRO, XRD:
-		if account.Flow == clientReader.Flow {
-			if destination.Address.Family().IsDomain() && destination.Address.Domain() == muxCoolAddress {
-				return newError(clientReader.Flow + " doesn't support Mux").AtWarning()
-			}
-			if xtlsConn, ok := iConn.(*xtls.Conn); ok {
-				xtlsConn.RPRX = true
-				if clientReader.Flow == XRD {
-					xtlsConn.DirectMode = true
-				}
-			} else {
-				return newError(`failed to use ` + clientReader.Flow + `, maybe "security" is not "xtls"`).AtWarning()
-			}
-		} else {
-			return newError("unable to use ", clientReader.Flow).AtWarning()
-		}
-	case "":
-	default:
-		return newError("unsupported flow " + account.Flow).AtWarning()
-	}
-
 	ctx = log.ContextWithAccessMessage(ctx, &log.AccessMessage{
 		From:   conn.RemoteAddr(),
 		To:     destination,
@@ -322,9 +293,6 @@ func (s *Server) fallback(ctx context.Context, sid errors.ExportOption, err erro
 	if len(apfb) > 1 || apfb[""] == nil {
 		if tlsConn, ok := iConn.(*tls.Conn); ok {
 			alpn = tlsConn.ConnectionState().NegotiatedProtocol
-			newError("realAlpn = " + alpn).AtInfo().WriteToLog(sid)
-		} else if xtlsConn, ok := iConn.(*xtls.Conn); ok {
-			alpn = xtlsConn.ConnectionState().NegotiatedProtocol
 			newError("realAlpn = " + alpn).AtInfo().WriteToLog(sid)
 		}
 		if apfb[alpn] == nil {
