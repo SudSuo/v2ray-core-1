@@ -46,10 +46,27 @@ jobs:
             goarch: arm
             goarm: 5
           # END Linux ARM 5 6 7
-          # Windows ARM 7
+          # BEGIN Windows ARM 7
           - goos: windows
             goarch: arm
             goarm: 7
+          # END Windows ARM 7
+          # BEGIN FreeBSD ARM 6 7
+          - goos: freebsd
+            goarch: arm
+            goarm: 6
+          - goos: freebsd
+            goarch: arm
+            goarm: 7
+          # END FreeBSD ARM 6 7
+          # BEGIN OpenBSD ARM 6 7
+          - goos: openbsd
+            goarch: arm
+            goarm: 6
+          - goos: openbsd
+            goarch: arm
+            goarm: 7
+          # END OpenBSD ARM 6 7
           # BEGIN Other architectures
           - goos: darwin
             goarch: arm64
@@ -57,6 +74,16 @@ jobs:
             goarch: arm64
           - goos: linux
             goarch: riscv64
+          - goos: linux
+            goarch: loong64
+          - goos: windows
+            goarch: arm64
+          - goos: android
+            goarch: arm64
+          - goos: freebsd
+            goarch: arm64
+          - goos: openbsd
+            goarch: arm64
           # BEGIN MIPS
           - goos: linux
             goarch: mips64
@@ -67,10 +94,6 @@ jobs:
           - goos: linux
             goarch: mips
           # END MIPS
-          # BEGIN Android
-          - goos: android
-            goarch: arm64
-          # END Android
           # END Other architectures
       fail-fast: false
 
@@ -83,7 +106,7 @@ jobs:
 
     steps:
       - name: Checkout codebase
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
@@ -92,13 +115,13 @@ jobs:
         run: |
           export _NAME=$(jq ".[\"$GOOS-$GOARCH$GOARM\"].friendlyName" -r < release/friendly-filenames.json)
           echo "GOOS: $GOOS, GOARCH: $GOARCH, GOARM: $GOARM, RELEASE_NAME: $_NAME"
-          echo "::set-output name=ASSET_NAME::$_NAME"
+          echo "ASSET_NAME=$_NAME" >> $GITHUB_OUTPUT
           echo "ASSET_NAME=$_NAME" >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
-          go-version: ^1.16
+          go-version: ^1.21
 
       - name: Get project dependencies
         run: go mod download
@@ -107,16 +130,18 @@ jobs:
         run: |
           mkdir -p build_assets
           go build -v -o build_assets/v2ray -trimpath -ldflags "-s -w -buildid=" ./main
-          go build -v -o build_assets/v2ctl -trimpath -ldflags "-s -w -buildid=" -tags confonly ./infra/control/main
 
-      - name: Build Windows wv2ray
+      - name: Rename Windows V2Ray
         if: matrix.goos == 'windows'
         run: |
-          echo "::warning ::wv2ray.exe will be removed in v5"
-          go build -v -o build_assets/wv2ray.exe -trimpath -ldflags "-s -w -H windowsgui -buildid=" ./main
           cd ./build_assets || exit 1
           mv v2ray v2ray.exe
-          mv v2ctl v2ctl.exe
+
+      - name: Download geo files
+        run: |
+          wget -O release/config/geoip.dat "https://raw.githubusercontent.com/v2fly/geoip/release/geoip.dat"
+          wget -O release/config/geoip-only-cn-private.dat "https://raw.githubusercontent.com/v2fly/geoip/release/geoip-only-cn-private.dat"
+          wget -O release/config/geosite.dat "https://raw.githubusercontent.com/v2fly/domain-list-community/release/dlc.dat"
 
       - name: Prepare package
         run: cp -v ./release/config/*.* ./build_assets
@@ -138,7 +163,7 @@ jobs:
           openssl dgst -sha512 $FILE | sed 's/([^)]*)//g' >>$DGST
 
       - name: Upload ZIP file to Artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: v2ray-${{ steps.get_filename.outputs.ASSET_NAME }}.zip
           path: v2ray-${{ steps.get_filename.outputs.ASSET_NAME }}.zip
@@ -157,18 +182,24 @@ jobs:
     needs: build
     steps:
       - name: Checkout codebase
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
-          go-version: ^1.16
+          go-version: ^1.21
 
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v3
         with:
           path: build_artifacts
+
+      - name: Create extra package
+        run: |
+          pushd ./release/extra/
+          zip -9vr ../../build_artifacts/v2ray-extra.zip .
+          popd
 
       - name: Generate shasum
         run: |
@@ -195,15 +226,20 @@ jobs:
           openssl dgst -sha256 $FILE | sed 's/([^)]*)//g' >>$DGST
           openssl dgst -sha512 $FILE | sed 's/([^)]*)//g' >>$DGST
 
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         with:
           name: Release.unsigned
           path: build_artifacts/Release.unsigned
 
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         with:
           name: Release.unsigned.dgst
           path: build_artifacts/Release.unsigned.dgst
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: v2ray-extra.zip
+          path: build_artifacts/v2ray-extra.zip
 
       - name: Upload Release.unsigned related files
         uses: svenstaro/upload-release-action@v2
@@ -213,3 +249,77 @@ jobs:
           file_glob: true
           file: build_artifacts/Release.unsigned*
           tag: ${{ github.ref }}
+
+      - name: Upload extra package
+        uses: svenstaro/upload-release-action@v2
+        if: github.event_name == 'release'
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file_glob: true
+          file: build_artifacts/v2ray-extra.zip
+          tag: ${{ github.ref }}
+  buildContainer:
+    if: github.event_name == 'release'
+    needs: signature
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [std, extra]
+        arch:
+          - v2Name: 32
+            containerName: 386
+          - v2Name: 64
+            containerName: amd64
+          - v2Name: arm32-v6
+            containerName: arm/v6
+          - v2Name: arm32-v7a
+            containerName: arm/v7
+          - v2Name: arm64-v8a
+            containerName: arm64
+          - v2Name: arm64-v8a
+            containerName: arm64/v8
+
+    name: Build And Push image
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY_USER: ${{ github.actor }}
+      REGISTRY_PASSWORD: ${{ github.token }}
+      IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+      RELEASE_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Log in to ghcr.io
+        uses: redhat-actions/podman-login@v1
+        with:
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+          registry: ${{ env.IMAGE_REGISTRY }}
+
+      - name: Download Assets
+        run: |
+          bash ./release/container/downloadAssets.sh ${{  github.ref_name }} ${{ matrix.arch.v2Name }} ${{ matrix.arch.containerName }} ${{ matrix.variant }}
+
+      - name: Buildah Action
+        id: build-image
+        uses: redhat-actions/buildah-build@v2
+        with:
+          image: v2ray
+          tags: ${{  github.ref_name }}-${{ matrix.arch.v2Name }}-${{ matrix.variant }}
+          containerfiles: |
+            ./release/container/Containerfile
+          build-args: |
+            TARGETPLATFORM=${{ matrix.arch.containerName }}
+            VARIANT=${{ matrix.variant }}
+          archs: ${{ matrix.arch.containerName }}
+          context: context/linux/${{ matrix.arch.containerName }}/${{ matrix.variant }}
+          extra-args: |
+            --squash
+            --timestamp 0
+
+      - name: Push To ghcr.io
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build-image.outputs.image }}
+          tags: ${{ steps.build-image.outputs.tags }}
+          registry: ${{ env.IMAGE_REGISTRY }}

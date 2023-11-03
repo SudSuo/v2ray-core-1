@@ -6,18 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/v2fly/v2ray-core/v4/common"
-	"github.com/v2fly/v2ray-core/v4/common/buf"
-	"github.com/v2fly/v2ray-core/v4/common/errors"
-	"github.com/v2fly/v2ray-core/v4/common/net"
-	"github.com/v2fly/v2ray-core/v4/common/protocol"
-	"github.com/v2fly/v2ray-core/v4/common/session"
-	"github.com/v2fly/v2ray-core/v4/common/signal/done"
-	"github.com/v2fly/v2ray-core/v4/common/task"
-	"github.com/v2fly/v2ray-core/v4/proxy"
-	"github.com/v2fly/v2ray-core/v4/transport"
-	"github.com/v2fly/v2ray-core/v4/transport/internet"
-	"github.com/v2fly/v2ray-core/v4/transport/pipe"
+	"github.com/v2fly/v2ray-core/v5/common"
+	"github.com/v2fly/v2ray-core/v5/common/buf"
+	"github.com/v2fly/v2ray-core/v5/common/errors"
+	"github.com/v2fly/v2ray-core/v5/common/net"
+	"github.com/v2fly/v2ray-core/v5/common/protocol"
+	"github.com/v2fly/v2ray-core/v5/common/session"
+	"github.com/v2fly/v2ray-core/v5/common/signal/done"
+	"github.com/v2fly/v2ray-core/v5/common/task"
+	"github.com/v2fly/v2ray-core/v5/proxy"
+	"github.com/v2fly/v2ray-core/v5/transport"
+	"github.com/v2fly/v2ray-core/v5/transport/internet"
+	"github.com/v2fly/v2ray-core/v5/transport/pipe"
 )
 
 type ClientManager struct {
@@ -135,14 +135,15 @@ type DialingWorkerFactory struct {
 	ctx context.Context
 }
 
-func NewDialingWorkerFactory(ctx context.Context, Proxy proxy.Outbound, Dialer internet.Dialer, Strategy ClientStrategy) *DialingWorkerFactory {
+func NewDialingWorkerFactory(ctx context.Context, proxy proxy.Outbound, dialer internet.Dialer, strategy ClientStrategy) *DialingWorkerFactory {
 	return &DialingWorkerFactory{
-		Proxy:    Proxy,
-		Dialer:   Dialer,
-		Strategy: Strategy,
+		Proxy:    proxy,
+		Dialer:   dialer,
+		Strategy: strategy,
 		ctx:      ctx,
 	}
 }
+
 func (f *DialingWorkerFactory) Create() (*ClientWorker, error) {
 	opts := []pipe.Option{pipe.WithSizeLimit(64 * 1024)}
 	uplinkReader, upLinkWriter := pipe.New(opts...)
@@ -152,7 +153,6 @@ func (f *DialingWorkerFactory) Create() (*ClientWorker, error) {
 		Reader: downlinkReader,
 		Writer: upLinkWriter,
 	}, f.Strategy)
-
 	if err != nil {
 		return nil, err
 	}
@@ -185,8 +185,10 @@ type ClientWorker struct {
 	strategy       ClientStrategy
 }
 
-var muxCoolAddress = net.DomainAddress("v1.mux.cool")
-var muxCoolPort = net.Port(9527)
+var (
+	muxCoolAddress = net.DomainAddress("v1.mux.cool")
+	muxCoolPort    = net.Port(9527)
+)
 
 // NewClientWorker creates a new mux.Client.
 func NewClientWorker(stream transport.Link, s ClientStrategy) (*ClientWorker, error) {
